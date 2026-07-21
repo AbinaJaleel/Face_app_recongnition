@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Face Recognition</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">◆</span>
+        <span class="brand-name">FaceRec</span>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-btn" id="btnEnroll">
+          <span class="nav-icon">＋</span><span>Enroll Face</span>
+        </button>
+        <button class="nav-btn" id="btnAttendance">
+          <span class="nav-icon">▶</span><span>Start Attendance</span>
+        </button>
+        <button class="nav-btn" id="btnLog">
+          <span class="nav-icon">▤</span><span>Attendance Log</span>
+        </button>
+        <button class="nav-btn" id="btnStop">
+          <span class="nav-icon">■</span><span>Stop Camera</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="divider"></div>
+        <div class="stat-label">ENROLLED PEOPLE</div>
+        <div class="stat-value" id="peopleCount">0</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="header">
+        <h1>Live Camera</h1>
+        <p>Enroll faces, then start attendance to recognize them. Runs entirely in your browser + this server — no data leaves this app.</p>
+      </header>
+
+      <div class="video-card">
+        <div class="video-wrap" id="videoWrap">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div class="video-off" id="videoOff">Camera is off</div>
+        </div>
+      </div>
+
+      <div class="status-bar">
+        <span class="status-dot" id="statusDot">●</span>
+        <span id="statusText">Idle. Choose an action from the sidebar.</span>
+      </div>
+    </main>
+  </div>
+
+  <!-- Enroll name modal -->
+  <div class="modal-backdrop" id="enrollModal">
+    <div class="modal">
+      <h2>Enroll new face</h2>
+      <p class="modal-sub">Enter the person's name, then look at the camera.</p>
+      <input type="text" id="enrollNameInput" placeholder="e.g. Priya Nair" autocomplete="off">
+      <div class="modal-actions">
+        <button class="btn-ghost" id="enrollCancelBtn">Cancel</button>
+        <button class="btn-primary" id="enrollConfirmBtn">Start Enrolling</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Attendance log modal -->
+  <div class="modal-backdrop" id="logModal">
+    <div class="modal modal-wide">
+      <div class="modal-header-row">
+        <h2>Attendance Log</h2>
+        <button class="btn-icon" id="logCloseBtn">✕</button>
+      </div>
+      <div class="log-table-wrap">
+        <table class="log-table">
+          <thead>
+            <tr><th>NAME</th><th>DATE</th><th>TIME</th></tr>
+          </thead>
+          <tbody id="logTableBody"></tbody>
+        </table>
+        <div id="logEmpty" class="log-empty" style="display:none;">No attendance records yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
