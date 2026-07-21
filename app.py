@@ -81,12 +81,23 @@ def _mark_attendance(name, state):
 
 
 def _decode_frame(data_url):
-    """data_url looks like 'data:image/jpeg;base64,/9j/4AAQ...'"""
-    header, encoded = data_url.split(",", 1)
-    binary = base64.b64decode(encoded)
-    arr = np.frombuffer(binary, dtype=np.uint8)
-    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    return frame
+    """data_url looks like 'data:image/jpeg;base64,/9j/4AAQ...'
+    Returns None (instead of raising) if the data is missing/malformed/empty,
+    so callers can respond with a clean error instead of a 500."""
+    if not data_url or "," not in data_url:
+        return None
+    try:
+        header, encoded = data_url.split(",", 1)
+        binary = base64.b64decode(encoded)
+        if not binary:
+            return None
+        arr = np.frombuffer(binary, dtype=np.uint8)
+        if arr.size == 0:
+            return None
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        return frame
+    except Exception:
+        return None
 
 
 @app.route("/")
@@ -119,7 +130,13 @@ def enroll_frame():
         return jsonify({"error": "Enrollment not started."}), 400
 
     data = request.get_json(force=True)
-    frame = _decode_frame(data["image"])
+    frame = _decode_frame(data.get("image"))
+
+    if frame is None:
+        # Bad/empty frame from the browser (camera still warming up, etc.)
+        # — don't count it, just ask the frontend to try again.
+        count = len(state["enroll_frames"])
+        return jsonify({"count": count, "target": ENROLL_TARGET_SAMPLES, "done": False, "skipped": True})
 
     if len(state["enroll_frames"]) < ENROLL_TARGET_SAMPLES:
         state["enroll_frames"].append(frame)
@@ -150,7 +167,9 @@ def enroll_cancel():
 def attendance_frame():
     state = get_state()
     data = request.get_json(force=True)
-    frame = _decode_frame(data["image"])
+    frame = _decode_frame(data.get("image"))
+    if frame is None:
+        return jsonify({"faces": [], "width": 0, "height": 0, "newly_marked": [], "skipped": True})
     h, w = frame.shape[:2]
 
     results = db.recognize(frame)
@@ -201,6 +220,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "1") == "1"
     app.run(host="0.0.0.0", port=port, debug=debug)
+
 
 
 
