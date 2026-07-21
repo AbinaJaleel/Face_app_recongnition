@@ -1,22 +1,21 @@
 """
-Core face-recognition logic — dlib-free version.
+Core face-recognition logic — dlib-free, GUI-free (safe for a server).
 
 Uses OpenCV's built-in Haar Cascade for face detection and its built-in
 LBPH (Local Binary Patterns Histograms) recognizer for identification.
-Both ship inside opencv-contrib-python as prebuilt wheels, so there's
-nothing to compile — no dlib, no cmake, no Visual Studio Build Tools.
+Both ship inside opencv-contrib-python-headless as prebuilt wheels — no
+dlib, no cmake, no compiler needed, no GUI dependencies (fine for Render).
 
-Trade-off vs. the face_recognition/dlib version: LBPH is a lighter,
-older algorithm (less accurate than deep-learning face embeddings), and
-there's no facial-landmark data to run a blink/liveness check on. A
-printed photo held up to the camera CAN fool this version — see
-ConsistencyTracker below for what it does instead.
+Trade-off vs. a dlib/face_recognition version: LBPH is a lighter, older
+algorithm (less accurate than deep-learning face embeddings), and there's
+no facial-landmark data to run a blink/liveness check on. A printed photo
+held up to the camera CAN fool this version — see ConsistencyTracker below
+for what it does instead.
 """
 
 import os
 import glob
 import pickle
-import urllib.request
 import numpy as np
 import cv2
 
@@ -26,36 +25,25 @@ LABELS_FILE = os.path.join(DATA_DIR, "labels.pkl")
 KNOWN_FACES_DIR = "known_faces"
 FACE_SIZE = (200, 200)
 
-# Kept as a local file in the project folder instead of relying on
-# cv2.data.haarcascades, since some opencv-contrib-python builds (notably
-# very new/unofficial wheels, e.g. on brand-new Python versions) don't ship
-# that data folder correctly. Downloaded automatically on first run if missing.
+# Shipped as a local file in the repo (no download-on-first-run needed,
+# and no reliance on an internet fetch at deploy time on Render).
 CASCADE_FILENAME = "haarcascade_frontalface_default.xml"
-CASCADE_URL = (
-    "https://raw.githubusercontent.com/opencv/opencv/master/data/"
-    "haarcascades/haarcascade_frontalface_default.xml"
-)
 
 
-def _ensure_cascade_file():
-    """Download the Haar cascade XML next to this script if it isn't already
-    there (checking cv2's bundled copy first, since that's usually free)."""
+def _cascade_path():
     local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CASCADE_FILENAME)
     if os.path.exists(local_path):
         return local_path
-
-    # Try the bundled copy that ships with OpenCV first.
+    # fall back to OpenCV's bundled copy if the local file is ever missing
     bundled_path = os.path.join(cv2.data.haarcascades, CASCADE_FILENAME)
     if os.path.exists(bundled_path):
         return bundled_path
-
-    # Fall back to downloading it once, next to this script.
-    print(f"Downloading {CASCADE_FILENAME} (first run only)...")
-    urllib.request.urlretrieve(CASCADE_URL, local_path)
-    return local_path
+    raise FileNotFoundError(
+        f"Could not find {CASCADE_FILENAME} locally or in cv2's bundled data."
+    )
 
 
-CASCADE_PATH = _ensure_cascade_file()
+CASCADE_PATH = _cascade_path()
 
 
 class FaceDatabase:
@@ -65,8 +53,7 @@ class FaceDatabase:
         self.detector = cv2.CascadeClassifier(CASCADE_PATH)
         if self.detector.empty():
             raise RuntimeError(
-                f"Failed to load face-detection cascade from {CASCADE_PATH}. "
-                "Delete this file and restart the app to re-download it."
+                f"Failed to load face-detection cascade from {CASCADE_PATH}."
             )
         self.recognizer = cv2.face.LBPHFaceRecognizer_create()
         self.label_to_name = {}   # int label -> name
@@ -98,7 +85,6 @@ class FaceDatabase:
             faces = self.detect_faces(gray)
             if len(faces) == 0:
                 continue
-            # use the largest detected face if several show up
             x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
             crop = cv2.resize(gray[y:y + h, x:x + w], FACE_SIZE)
             saved += 1
@@ -163,8 +149,8 @@ class FaceDatabase:
                         name = self.label_to_name.get(label, "Unknown")
                 except cv2.error:
                     pass
-            # box kept in (top, right, bottom, left) form to match the UI code
-            results.append({"name": name, "box": (y, x + w, y + h, x), "confidence": conf})
+            # box kept in (top, right, bottom, left) form
+            results.append({"name": name, "box": (int(y), int(x + w), int(y + h), int(x)), "confidence": conf})
         return results
 
 
