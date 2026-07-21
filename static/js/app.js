@@ -47,12 +47,19 @@ function refreshPeopleCount() {
 }
 
 function captureFrameDataURL() {
+  if (!video.videoWidth || !video.videoHeight) {
+    return null; // camera hasn't actually produced a real frame yet
+  }
   const canvas = document.createElement("canvas");
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   const ctx = canvas.getContext("2d");
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.75);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function resizeOverlay() {
@@ -69,6 +76,27 @@ async function openCamera() {
     video.srcObject = stream;
     video.classList.remove("hidden");
     videoOff.style.display = "none";
+
+    // Wait until the video actually has real dimensions/frames before
+    // letting any caller start capturing — otherwise the first several
+    // captured frames are blank (0x0), which silently fails face
+    // detection and can make enrollment give up almost immediately.
+    await new Promise((resolve) => {
+      if (video.readyState >= 2 && video.videoWidth > 0) {
+        resolve();
+        return;
+      }
+      const onReady = () => {
+        video.removeEventListener("loadeddata", onReady);
+        resolve();
+      };
+      video.addEventListener("loadeddata", onReady);
+    });
+
+    // Small extra settle time — on some cameras/browsers "loadeddata"
+    // fires a moment before frames are reliably paintable to a canvas.
+    await sleep(300);
+
     resizeOverlay();
   } catch (err) {
     setStatus("Could not access the camera: " + err.message, "error");
@@ -76,7 +104,7 @@ async function openCamera() {
   }
 }
 
-function stopCamera() {
+function stopCamera(preserveStatus = false) {
   mode = null;
   setActiveNav(null);
   clearTimeout(captureTimer);
@@ -89,7 +117,9 @@ function stopCamera() {
   video.classList.add("hidden");
   videoOff.style.display = "block";
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-  setStatus("Camera stopped.", "idle");
+  if (!preserveStatus) {
+    setStatus("Camera stopped.", "idle");
+  }
 }
 
 btnStop.addEventListener("click", stopCamera);
@@ -137,9 +167,16 @@ enrollConfirmBtn.addEventListener("click", async () => {
   enrollLoop(name);
 });
 
-function enrollLoop(name) {
+function enrollLoop(name, failCount = 0) {
   if (mode !== "enroll") return;
   const imageData = captureFrameDataURL();
+
+  if (!imageData) {
+    // Camera not producing real frames yet — wait a bit and try again,
+    // this doesn't count against the failure budget.
+    captureTimer = setTimeout(() => enrollLoop(name, failCount), 200);
+    return;
+  }
 
   fetch("/api/enroll/frame", {
     method: "POST",
@@ -149,13 +186,18 @@ function enrollLoop(name) {
     .then((r) => r.json())
     .then((data) => {
       if (data.error) {
-        setStatus(data.error, "error");
-        mode = null;
+        const nextFail = failCount + 1;
+        if (nextFail >= 5) {
+          setStatus(data.error, "error");
+          stopCamera(true);
+        } else {
+          captureTimer = setTimeout(() => enrollLoop(name, nextFail), CAPTURE_INTERVAL_MS);
+        }
         return;
       }
       if (!data.done) {
         setStatus(`Enrolling '${name}'... (${data.count}/${data.target})`, "info");
-        captureTimer = setTimeout(() => enrollLoop(name), CAPTURE_INTERVAL_MS);
+        captureTimer = setTimeout(() => enrollLoop(name, 0), CAPTURE_INTERVAL_MS);
       } else {
         if (data.success) {
           setStatus(`Enrolled '${data.name}' successfully.`, "success");
@@ -163,12 +205,17 @@ function enrollLoop(name) {
         } else {
           setStatus("Enrollment failed — no face detected. Try again with better lighting.", "error");
         }
-        stopCamera();
+        stopCamera(true);
       }
     })
-    .catch(() => {
-      setStatus("Lost connection while enrolling. Try again.", "error");
-      stopCamera();
+    .catch((err) => {
+      const nextFail = failCount + 1;
+      if (nextFail >= 5) {
+        setStatus("Lost connection while enrolling: " + err.message, "error");
+        stopCamera(true);
+      } else {
+        captureTimer = setTimeout(() => enrollLoop(name, nextFail), CAPTURE_INTERVAL_MS);
+      }
     });
 }
 
@@ -192,6 +239,11 @@ btnAttendance.addEventListener("click", async () => {
 function attendanceLoop() {
   if (mode !== "attendance") return;
   const imageData = captureFrameDataURL();
+
+  if (!imageData) {
+    captureTimer = setTimeout(attendanceLoop, 200);
+    return;
+  }
 
   fetch("/api/attendance/frame", {
     method: "POST",
@@ -276,3 +328,4 @@ logCloseBtn.addEventListener("click", () => logModal.classList.remove("open"));
 
 // -------------------------------------------------------------------- init --
 refreshPeopleCount();
+
